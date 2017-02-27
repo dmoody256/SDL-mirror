@@ -285,6 +285,42 @@ def ConfigPlatformEnv(env, baseProjectDir):
                 return
         print('Missing clock_gettime, continuing without it...')
 
+    def ConfigureSDLVersion(conf):
+        SDL_MAJOR_VERSION=2
+        SDL_MINOR_VERSION=0
+        SDL_MICRO_VERSION=5
+        SDL_INTERFACE_AGE=1
+        SDL_BINARY_AGE=5
+
+        LT_CURRENT=SDL_MICRO_VERSION-SDL_INTERFACE_AGE
+        LT_AGE=SDL_BINARY_AGE-SDL_INTERFACE_AGE
+        LT_MAJOR=LT_CURRENT-LT_AGE
+
+        LT_REVISION = str(SDL_INTERFACE_AGE)
+        LT_RELEASE = str(SDL_MAJOR_VERSION)+'.'+str(SDL_MINOR_VERSION)
+        LT_VERSION = str(LT_MAJOR)+'.'+str(LT_AGE)+'.'+str(SDL_INTERFACE_AGE)
+
+        SDL_VERSION = str(SDL_MAJOR_VERSION)+'.'+str(SDL_MINOR_VERSION)+'.'+str(SDL_MICRO_VERSION)
+
+        conf.env.Append(CPPDEFINES=[
+            'SDL_MAJOR_VERSION='+str(SDL_MAJOR_VERSION),
+            'SDL_MINOR_VERSION='+str(SDL_MINOR_VERSION),
+            'SDL_MICRO_VERSION='+str(SDL_MICRO_VERSION),
+            'SDL_INTERFACE_AGE='+str(SDL_INTERFACE_AGE),
+            'SDL_BINARY_AGE='+str(SDL_BINARY_AGE),
+            'LT_REVISION='+LT_REVISION,
+            'LT_RELEASE='+LT_RELEASE,
+            'LT_VERSION='+LT_VERSION,
+            'SDL_VERSION='+SDL_VERSION
+        ])
+
+        print ("Building SDL version " + SDL_VERSION + "\nlibtool version: "
+                + LT_VERSION + " :: "
+                + str(LT_AGE) + " :: "
+                + LT_REVISION + " :: "
+                + str(LT_CURRENT) + " :: "
+                + LT_RELEASE)
+
 
     conf = Configure(env, custom_tests = dict([
         ('Check_3DNow', Check_3DNow),
@@ -296,6 +332,7 @@ def ConfigPlatformEnv(env, baseProjectDir):
     if platform == "linux" or platform == "linux2":
 
         env.Append(CPPDEFINES=['LINUX'])
+        ConfigureSDLVersion(conf)
         ConfigureDLOPEN(conf)
         ConfigureAssertions(conf)
         if(env['ASSEMBLY']):
@@ -312,6 +349,7 @@ def ConfigPlatformEnv(env, baseProjectDir):
     elif platform == "win32":
 
         env.Append(CPPDEFINES=['WIN32'])
+        ConfigureSDLVersion(conf)
         ConfigureAssertions(conf)
         if(env['ASSEMBLY'] == True):
             Configure3DNow(conf)
