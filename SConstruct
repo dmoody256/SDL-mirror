@@ -17,10 +17,29 @@ import glob
 import re
 from sys import platform
 
+subsystems = [
+    'atomic',
+    'audio',
+    'video',
+    'render',
+    'events',
+    'joystick',
+    'haptic',
+    'power',
+    'threads',
+    'timers',
+    'file',
+    'loadso',
+    'cpuinfo',
+    'filesystem',
+    'dlopen',
+]
 
 def CreateNewEnv():
 
     CreateOptions()
+    #TODO dynamic susystem options
+    #options_List =
 
     env = Environment(
             DEBUG_BUILD = GetOption('debug_build'),
@@ -29,13 +48,16 @@ def CreateNewEnv():
             ASSEMBLY = GetOption('disable-asm'),
             ASSERTIONS = GetOption('assertions'),
             CLOCK_GETTIME = GetOption('clock_gettime'),
-            TARGET_ARCH='x86',
+            FORCE_STATIC_VCRT = GetOption('force_static_vcrt'),
+            TARGET_ARCH = GetOption('arch'),
         );
 
 
     baseProjectDir = os.path.abspath(Dir('.').abspath).replace('\\', '/')
     print("BASE_DIR="+baseProjectDir)
     env.VariantDir(baseProjectDir +'/build', baseProjectDir +'/src', duplicate=0)
+
+    env = ConfigPlatformEnv(env, baseProjectDir)
 
     sourceFiles = []
     headerFiles = []
@@ -55,7 +77,11 @@ def CreateNewEnv():
     sourceFiles.extend(glob.glob(baseProjectDir +'/src/timer/*.c'))
     sourceFiles.extend(glob.glob(baseProjectDir +'/src/video/*.c'))
 
+    #if(env['SDL_JOYSTICK')):
+    #    sourceFiles.extend(glob.glob(baseProjectDir +'/src/joystick/*.c'))
+
     sourceFiles = [file.replace("src", 'build') for file in sourceFiles]
+
 
 
     headerFiles.extend(glob.glob(baseProjectDir +'/src/*.h'))
@@ -77,7 +103,7 @@ def CreateNewEnv():
         baseProjectDir + "/include",
     ])
 
-    env = ConfigPlatformEnv(env, baseProjectDir)
+
     prog = env.SharedLibrary("build/SDL", sourceFiles)
     env = ConfigPlatformIDE(env, sourceFiles, headerFiles, prog)
 
@@ -321,6 +347,58 @@ def ConfigPlatformEnv(env, baseProjectDir):
                 + str(LT_CURRENT) + " :: "
                 + LT_RELEASE)
 
+    def ConfigureArch(conf):
+
+        if(conf.env['TARGET_ARCH'] == 'x86'):
+            print( 'Building for x86 target' )
+            conf.env.Append(CPPDEFINES=[
+                'ARCH_64=0',
+                'PROCESSOR_ARCH=x86',
+            ])
+        elif(conf.env['TARGET_ARCH'] == 'x86_64'):
+            print( 'Building for x86_64 target' )
+            conf.env.Append(CPPDEFINES=[
+                'ARCH_64=1',
+                'PROCESSOR_ARCH=x64',
+            ])
+
+    def ConfigureSubSystems(conf):
+
+        for sub in subsystems:
+            conf.env.Append(CPPDEFINES=[
+                'SDL_'  + sub.upper() + '_ENABLED_BY_DEFAULT=1'
+            ])
+            conf.env[sub.upper()] = True
+
+    def ConfigureMMX(conf):
+
+        if('MSVC_VERSION' in env and float(env['MSVC_VERSION']) > 15.0):
+            if('ARCH_64=0' in conf.env['CPPDEFINES']):
+                conf.env.Append(CPPDEFINES=[
+                    'HAVE_MMX=1',
+                ])
+                print ('32 bit MSVC > 15.0 found, enabling MMX...')
+
+    def ConfigureSSE(conf):
+
+        if('MSVC_VERSION' in env and float(env['MSVC_VERSION']) > 15.0):
+            conf.env.Append(CPPDEFINES=[
+                'HAVE_SSE=1',
+                'HAVE_SSE=1',
+                'HAVE_SSE=1',
+                'SDL_ASSEMBLY_ROUTINES=1',
+            ])
+            print ('MSVC > 15.0 found, enabling SSE...')
+
+    def ConfigureLIBC(conf):
+        if(env['LIBC']):
+            print('Using libc...')
+        else:
+            if('WINDOWS' in conf.env['CPPDEFINES']):
+                conf.env.Append(CPPDEFINES=[
+                    'HAVE_STDARG_H=1',
+                    'HAVE_STDDEF_H=1',
+                ])
 
     conf = Configure(env, custom_tests = dict([
         ('Check_3DNow', Check_3DNow),
@@ -329,15 +407,26 @@ def ConfigPlatformEnv(env, baseProjectDir):
         ('Check_ARTS', Check_ARTS),
     ]))
 
+    conf.env.Append(CPPDEFINES=[
+        'LIBNAME=SDL2',
+        'LIBTYPE=SHARED',
+    ])
+
+
     if platform == "linux" or platform == "linux2":
 
-        env.Append(CPPDEFINES=['LINUX'])
+        conf.env.Append(CPPDEFINES=['LINUX'])
+
         ConfigureSDLVersion(conf)
+        ConfigureArch(conf)
+
         ConfigureDLOPEN(conf)
         ConfigureAssertions(conf)
+
         if(env['ASSEMBLY']):
             Configure3DNow(conf)
             ConfigureAltivec(conf)
+
         if(env['CLOCK_GETTIME']):
             ConfigureClockGetTime(conf)
 
@@ -348,24 +437,56 @@ def ConfigPlatformEnv(env, baseProjectDir):
         print("XCode project not implemented yet")
     elif platform == "win32":
 
-        env.Append(CPPDEFINES=['WIN32'])
+        conf.env.Append(CPPDEFINES=[
+            'WIN32',
+            'WINDOWS=1',
+            'UNIX_SYS=OFF',
+            'UNIX_OR_MAC_SYS=OFF',
+            'SDL_PTHREADS_ENABLED_BY_DEFAULT=OFF',
+            'OPT_DEF_SSEMATH=ON',
+            'OPT_DEF_LIBC=ON',
+            'USE_GCC=0',
+        ])
+
         ConfigureSDLVersion(conf)
+
+        if('MSVC_VERSION' in env):
+            print('Using MSVC version ' + env['MSVC_VERSION'])
+            if(float(env['MSVC_VERSION']) < 14.0):
+                print('MSVC Version is too low (<14), turning off assenbly routines')
+                env['ASSEMBLY'] == False
+
+        ConfigureArch(conf)
         ConfigureAssertions(conf)
+
         if(env['ASSEMBLY'] == True):
             Configure3DNow(conf)
             ConfigureAltivec(conf)
+            ConfigureMMX(conf)
+            ConfigureSSE(conf)
 
         degugDefine = 'NDEBUG',
         debugFlag = "/O2"
         degug = '/DEBUG:NONE',
-        debugRuntime = "/MD",
+        msvcRuntime = "/MD",
         libType = "Release"
+        rtcFlag = ''
+        if(conf.env['FORCE_STATIC_VCRT']):
+            msvcRuntime = "/MT"
+
         if(conf.env['DEBUG_BUILD']):
             degugDefine = 'DEBUG',
             debugFlag = "/Od"
             degug = '/DEBUG:FULL',
-            debugRuntime = "/MDd",
+            msvcRuntime = "/MDd",
+            rtcFlag = '/RTC1'
+            if(conf.env['FORCE_STATIC_VCRT']):
+                msvcRuntime = "/MTd"
+                rtcFlag = ''
             libType = 'Debug'
+
+
+
 
         conf.env.Append(CPPDEFINES=[
             "WIN32",
@@ -385,9 +506,10 @@ def ConfigPlatformEnv(env, baseProjectDir):
             "/Zc:forScope",             # Force Conformance in for Loop Scope
             "/GR",                      # Enable Run-Time Type Information
             "/Oy-",                     # Disable Frame-Pointer Omission
-            debugRuntime,               # Use Multithread DLL version of the runt-time library
+            msvcRuntime,               # Use Multithread DLL version of the runt-time library
             "/EHsc",
             "/nologo",
+            rtcFlag,
         ])
 
         conf.env.Append(LINKFLAGS=[
@@ -424,6 +546,7 @@ def ConfigPlatformIDE(env, sourceFiles, headerFiles, program):
     return env
 
 def CreateOptions():
+
     AddOption(
         '--debug_build',
         dest='debug_build',
@@ -431,6 +554,15 @@ def CreateOptions():
         metavar='DIR',
         default=False,
         help='Build in debug mode'
+    )
+
+    AddOption(
+        '--arch',
+        dest='arch',
+        action='store',
+        metavar='DIR',
+        default='x86',
+        help='platform arch type [x86|x86_64|arm|arm64]'
     )
 
     AddOption(
@@ -470,6 +602,15 @@ def CreateOptions():
     )
 
     AddOption(
+        '--force_static_vcrt',
+        dest='force_static_vcrt',
+        action='store_true',
+        metavar='DIR',
+        default=False,
+        help="Force /MT for static VC runtimes"
+    )
+
+    AddOption(
         '--assertion-level',
         dest='assertions',
         action='store',
@@ -477,5 +618,15 @@ def CreateOptions():
         default='auto',
         help='Enable internal sanity checks (auto/disabled/release/enabled/paranoid)'
     )
+
+    for sub in subsystems:
+        AddOption(
+            '--disable-' + sub,
+            dest='disable-' + sub,
+            action='store_false',
+            metavar='DIR',
+            default='True',
+            help='Enable the ' + sub + ' subsystem'
+        )
 
 CreateNewEnv()
